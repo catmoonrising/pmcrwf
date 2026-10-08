@@ -1,0 +1,419 @@
+/* ============================================================
+   SPELL LIBRARY - import & search 5e.tools spell JSON
+   ============================================================ */
+const SPELL_SCHOOLS = { A:"Abjuration", C:"Conjuration", D:"Divination", E:"Enchantment", V:"Evocation", I:"Illusion", N:"Necromancy", T:"Transmutation" };
+// Full book names (from 5e.tools parser.js) for hover tooltips on the source toggles
+const SOURCE_NAMES = {
+  PHB:"Player's Handbook (2014)", XGE:"Xanathar's Guide to Everything", TCE:"Tasha's Cauldron of Everything",
+  SCAG:"Sword Coast Adventurer's Guide", EEPC:"Elemental Evil Player's Companion", GGR:"Guildmasters' Guide to Ravnica",
+  AI:"Acquisitions Incorporated", EGW:"Explorer's Guide to Wildemount", ToR:"Tide of Retribution", DD:"Dangerous Designs",
+  FS:"Frozen Sick", US:"Unwelcome Spirits", FTD:"Fizban's Treasury of Dragons", IDRotF:"Icewind Dale: Rime of the Frostmaiden",
+  SatO:"Sigil and the Outlands", AAG:"Astral Adventurer's Guide", SCC:"Strixhaven: A Curriculum of Chaos",
+  BMT:"The Book of Many Things", LLK:"Lost Laboratory of Kwalish", FRHoF:"Forgotten Realms: Heroes of Faerûn",
+  EFA:"Eberron: Forge of the Artificer", "AitFR-AVT":"Adventures in the Forgotten Realms: A Verdant Tomb",
+  XPHB:"Player's Handbook (2024)",
+  /* The rest of 2014-era D&D. This list started spell-shaped, which is why the Equipment Library's
+     book filter used to show bare abbreviations for most of its chips - items come from far more
+     books than spells do (65 sources against about 30). Same rule as everywhere else in this file:
+     short, fixed, prose-free lookup, no sourcebook text. */
+  DMG:"Dungeon Master's Guide (2014)", MM:"Monster Manual (2014)", MTF:"Mordenkainen's Tome of Foes",
+  VGM:"Volo's Guide to Monsters", MPMM:"Monsters of the Multiverse", MOT:"Mythic Odysseys of Theros",
+  ERLW:"Eberron: Rising from the Last War", VRGR:"Van Richten's Guide to Ravenloft",
+  BGG:"Bigby Presents: Glory of the Giants", DSotDQ:"Dragonlance: Shadow of the Dragon Queen",
+  SDW:"Sleeping Dragon's Wake", AWM:"Adventure with Muk", OGA:"One Grung Above",
+  BGDIA:"Baldur's Gate: Descent into Avernus", CM:"Candlekeep Mysteries", CoS:"Curse of Strahd",
+  CRCotN:"Critical Role: Call of the Netherdeep", CoA:"Chains of Asmodeus", DC:"Divine Contention",
+  DitLCoT:"Descent into the Lost Caverns of Tsojcanth", EET:"Elemental Evil: Trinkets",
+  GoS:"Ghosts of Saltmarsh", "HAT-LMI":"Honor Among Thieves: Legendary Magic Items",
+  HftT:"Hunt for the Thessalhydra", HotDQ:"Hoard of the Dragon Queen", IMR:"Infernal Machine Rebuild",
+  JttRC:"Journeys through the Radiant Citadel", KftGV:"Keys from the Golden Vault",
+  LMoP:"Lost Mine of Phandelver", LR:"Locathah Rising", LoX:"Light of Xaryxis",
+  "MCV2DC":"Monstrous Compendium Volume 2: Dragonlance Creatures",
+  "NRH-AT":"NERDS Restoring Harmony: Adventure Together", "NRH-TLT":"NERDS Restoring Harmony: The Lost Tomb",
+  OotA:"Out of the Abyss", PaBTSO:"Phandelver and Below: The Shattered Obelisk", PotA:"Princes of the Apocalypse",
+  PSA:"Plane Shift: Amonkhet", PSD:"Plane Shift: Dominaria", PSI:"Plane Shift: Innistrad",
+  PSK:"Plane Shift: Kaladesh", PSX:"Plane Shift: Ixalan", PSZ:"Plane Shift: Zendikar",
+  QftIS:"Quests from the Infinite Staircase", RMBRE:"The Lost Dungeon of Rickedness: Big Rick Energy",
+  RoT:"The Rise of Tiamat", RoTOS:"The Rise of Tiamat Online Supplement", SKT:"Storm King's Thunder",
+  TTP:"The Tortle Package", TftYP:"Tales from the Yawning Portal", ToA:"Tomb of Annihilation",
+  VEoR:"Vecna: Eve of Ruin", WBtW:"The Wild Beyond the Witchlight", WDH:"Waterdeep: Dragon Heist",
+  WDMM:"Waterdeep: Dungeon of the Mad Mage", XMtS:"X Marks the Spot", BAM:"Boo's Astral Menagerie",
+  AZfyT:"A Zib for your Thoughts", "AitFR-THP":"Adventures in the Forgotten Realms: The Hidden Page",
+  UATheMysticClass:"Unearthed Arcana: The Mystic Class",
+};
+// 5e.tools' own Core/Supplement/Adventure split (Parser.SOURCES_ADVENTURES vs. everything else in
+// Parser.SOURCE_JSON_TO_FULL, with the 3 actual core rulebooks carved out of "everything else"):
+// a short, fixed, prose-free lookup, same footing as SOURCE_NAMES above.
+const SOURCE_GROUP = {
+  PHB:"core", XPHB:"core", DMG:"core", MM:"core",
+  ToR:"adventure", DD:"adventure", FS:"adventure", US:"adventure", IDRotF:"adventure", LLK:"adventure", "AitFR-AVT":"adventure",
+  "AitFR-THP":"adventure", AWM:"adventure", AZfyT:"adventure", BGDIA:"adventure", CM:"adventure", CoA:"adventure",
+  CoS:"adventure", CRCotN:"adventure", DC:"adventure", DitLCoT:"adventure", DSotDQ:"adventure", EET:"adventure",
+  GoS:"adventure", "HAT-LMI":"adventure", HftT:"adventure", HotDQ:"adventure", IMR:"adventure", JttRC:"adventure",
+  KftGV:"adventure", LMoP:"adventure", LR:"adventure", LoX:"adventure", "NRH-AT":"adventure", "NRH-TLT":"adventure",
+  OGA:"adventure", OotA:"adventure", PaBTSO:"adventure", PotA:"adventure", QftIS:"adventure", RMBRE:"adventure",
+  RoT:"adventure", RoTOS:"adventure", SDW:"adventure", SKT:"adventure", TTP:"adventure", TftYP:"adventure",
+  ToA:"adventure", VEoR:"adventure", WBtW:"adventure", WDH:"adventure", WDMM:"adventure", XMtS:"adventure",
+};
+function sourceGroupOf(src) { return SOURCE_GROUP[src] || "supplement"; }
+const LIB_SCHEMA = 7;  // bump when the parsed-spell shape changes (forces a one-time re-import)
+function castCat(u) { return (u === "action" || u === "bonus" || u === "reaction" || u === "minute" || u === "hour") ? u : ""; }
+// 5e.tools' Parser.SPELL_AREA_TYPE_TO_FULL - short area-of-effect shape codes from a spell's own
+// areaTags field (not every spell has one; single-target spells usually don't).
+const SPELL_AREA_TYPES = {
+  ST:"Single Target", MT:"Multiple Targets", C:"Cube", N:"Cone", Y:"Cylinder", S:"Sphere",
+  R:"Circle", Q:"Square", L:"Line", H:"Hemisphere", W:"Wall", E:"Emanation",
+};
+// Categorized range (Parser.SPELL_ATTACK_TYPE_TO_FULL groups distance into a handful of buckets;
+// exact distances are a numeric-range filter, tracked separately - see DOCS.md's Range-valued filters).
+function rangeCat(raw) {
+  const r = raw.range; if (!r) return "";
+  const d = r.distance; if (!d) return "special";
+  if (d.type === "self" || d.type === "touch" || d.type === "sight" || d.type === "unlimited") return d.type;
+  return "ranged"; // feet or miles
+}
+// Exact numeric range in feet, for the Range-valued (numeric) filter - only meaningful for a
+// feet-based range (miles/touch/self/sight/unlimited have no comparable "how far" number).
+function rangeFeet(raw) {
+  const d = raw.range && raw.range.distance;
+  return (d && d.type === "feet" && typeof d.amount === "number") ? d.amount : null;
+}
+function durationCat(raw) { const du = raw.duration && raw.duration[0]; return du ? du.type : ""; }
+// filter groups. `dynamic` groups (Source) compute their options from the loaded library.
+const SPELL_FGROUPS = [
+  { key:"source", label:"Source", dynamic:true, get:s=>[s.source], dynOpts:()=>spellSources().map(src=>[src, escapeHtml(SOURCE_NAMES[src]||src)]) },
+  { key:"srcgroup", label:"Source Group", get:s=>[sourceGroupOf(s.source)], opts:[["core","Core"],["supplement","Supplement"],["adventure","Adventure"]] },
+  // Not every 5e.tools data dump includes per-spell class lists ("classes.fromClassList") -
+  // when it's missing this group just has no options to show (see DOCS re: import-not-hardcode).
+  { key:"cls",    label:"Class",  dynamic:true, get:s=>s.classes||[], dynOpts:spellClassesInLib },
+  { key:"level",  label:"Level",  get:s=>[String(s.level)], opts:[["0","0"],["1","1"],["2","2"],["3","3"],["4","4"],["5","5"],["6","6"],["7","7"],["8","8"],["9","9"]] },
+  { key:"school", label:"School", get:s=>[s.school], opts:["Abjuration","Conjuration","Divination","Enchantment","Evocation","Illusion","Necromancy","Transmutation"].map(x=>[x,x]) },
+  { key:"dmg",    label:"Damage", get:s=>s.dmgTypes, opts:["acid","bludgeoning","cold","fire","force","lightning","necrotic","piercing","poison","psychic","radiant","slashing","thunder"].map(x=>[x, x[0].toUpperCase()+x.slice(1)]) },
+  { key:"save",   label:"Save",   get:s=>s.save?[s.save]:[], opts:[["strength","Str"],["dexterity","Dex"],["constitution","Con"],["intelligence","Int"],["wisdom","Wis"],["charisma","Cha"]] },
+  { key:"atk",    label:"Spell Attack", get:s=>s.attack?[s.atkType]:[], opts:[["M","Melee"],["R","Ranged"],["O","Other"]] },
+  { key:"cond",   label:"Conditions Inflicted", get:s=>s.conds||[],
+    opts:["blinded","charmed","deafened","exhaustion","frightened","grappled","incapacitated","invisible","paralyzed","petrified","poisoned","prone","restrained","stunned","unconscious"]
+      .map(x=>[x, x[0].toUpperCase()+x.slice(1)]) },
+  { key:"range",  label:"Range",  get:s=>s.rangeCat?[s.rangeCat]:[], opts:[["self","Self"],["touch","Touch"],["ranged","Ranged"],["sight","Sight"],["unlimited","Unlimited"],["special","Special"]] },
+  // Exact-distance filter - only spells with a plain feet-based range have a value here (see
+  // rangeFeet() above); the categorical Range group just above covers Self/Touch/Sight/Unlimited/Special.
+  { key:"rangeft", label:"Range (ft)", kind:"range", unit:"ft", min:5, max:1000, getNum:s=>s.rangeFt },
+  { key:"area",   label:"Area of Effect", get:s=>s.areaTags||[], opts:Object.entries(SPELL_AREA_TYPES).map(([v,lab])=>[v,lab]) },
+  { key:"dur",    label:"Duration", get:s=>s.durType?[s.durType]:[], opts:[["instant","Instantaneous"],["timed","Timed"],["permanent","Permanent"],["special","Special"]] },
+  { key:"cast",   label:"Cast",   get:s=>[castCat(s.cast)], opts:[["action","Action"],["bonus","Bonus"],["reaction","Reaction"],["minute","Minute+"],["hour","Hour+"]] },
+  { key:"comp",   label:"Components", get:s=>["v","s","m"].filter(k=>s.comp&&s.comp[k]), opts:[["v","Verbal"],["s","Somatic"],["m","Material"]] },
+  { key:"misc",   label:"Misc",   get:s=>["conc","ritual","attack","srd"].filter(k=> k==="conc"?s.conc : k==="ritual"?s.ritual : k==="attack"?s.attack : s.srd), opts:[["conc","Concentration"],["ritual","Ritual"],["attack","Attack roll"],["srd","SRD"]] },
+  // House-rule bans (src/house-rules.js). A filter group rather than a hard exclusion, so the default
+  // is "show them, marked" and a player who wants them gone excludes with the same control they use
+  // for everything else - no separate hide-banned mode to learn.
+  { key:"banned", label:"House Rules", get:s=>[(typeof isBanned === "function" && isBanned("spell", s.name, s.source)) ? "banned" : "allowed"],
+    opts:[["allowed","Allowed"],["banned","Banned"]] },
+];
+let SPELL_LIB = [];
+// The tri-state filter state machine lives in src/filters.js, shared with the Equipment Library.
+// ns "spell" keeps the existing localStorage keys (charsheet-spellfilters / -spellfilter-defaults).
+const SPELL_FILTERS = createFilterSet({
+  ns: "spell", groups: SPELL_FGROUPS, areaId: "spell-filter-area", searchId: "spell-search",
+  onChange: () => renderSpellResults(),
+});
+
+// flattenEntries/stripTags now live in text-utils.js (shared with the Node-side effects pipeline).
+function spellDice(raw) {
+  const sc = raw.scalingLevelDice;                                  // cantrips scale with character level
+  if (sc) {
+    const scal = Array.isArray(sc) ? (sc[0] && sc[0].scaling) : sc.scaling;
+    if (scal) { const lvl = totalLevel() || 1; let best = ""; Object.keys(scal).map(Number).sort((a, b) => a - b).forEach(th => { if (lvl >= th) best = scal[th]; }); if (best) return best; }
+  }
+  const txt = flattenEntries(raw.entries);
+  const m = txt.match(/{@damage ([^}|]+)}/i) || txt.match(/{@dice ([^}|]+)}/i);
+  return m ? m[1].trim() : "";
+}
+/* ----- display fields for the Spellcasting table ----- */
+const SPELL_TIME_SHORT = { action: "A", bonus: "BA", reaction: "R" };
+const SPELL_UNIT_SHORT = { minute: "m", hour: "h", round: "rd", day: "d", turn: "turn" };
+function spellTimeStr(raw) {
+  const t = raw.time && raw.time[0]; if (!t) return "";
+  if (SPELL_TIME_SHORT[t.unit]) return (t.number > 1 ? t.number : "") + SPELL_TIME_SHORT[t.unit];
+  return (t.number || 1) + (SPELL_UNIT_SHORT[t.unit] || " " + t.unit);
+}
+function spellCastKind(raw) {
+  const u = raw.time && raw.time[0] && raw.time[0].unit;
+  return u === "action" || u === "bonus" || u === "reaction" ? u : "other";
+}
+function spellRangeStr(raw) {
+  const r = raw.range; if (!r) return "";
+  const d = r.distance || {};
+  const dist = d.type === "feet" ? d.amount + " ft" : d.type === "miles" ? d.amount + (d.amount === 1 ? " mile" : " miles") : "";
+  if (r.type === "special") return "Special";
+  if (r.type !== "point") return "Self" + (dist ? ` (${dist.replace(" ft", "-ft")} ${r.type})` : "");
+  if (d.type === "self") return "Self";
+  if (d.type === "touch") return "Touch";
+  if (d.type === "sight") return "Sight";
+  if (d.type === "unlimited") return "Unlimited";
+  return dist || "";
+}
+function spellDurationStr(raw) {
+  const du = raw.duration && raw.duration[0]; if (!du) return "";
+  if (du.type === "instant") return "Instant";
+  if (du.type === "permanent") return "Until dispelled";
+  if (du.type === "special") return "Special";
+  const d = du.duration || {};
+  const unit = { round: "rd", minute: "min", hour: "h", day: "d", week: "wk", year: "yr", turn: "turn" }[d.type] || d.type || "";
+  return (d.upTo ? "Up to " : "") + (d.amount || 1) + " " + unit;
+}
+/* The spell's own dice: {@damage X} for damage, {@dice X} for a healing spell, plus whether the
+   text adds "your spellcasting ability modifier" right after it. */
+function spellEffect(raw) {
+  const txt = flattenEntries(raw.entries);
+  const heal = (raw.miscTags || []).includes("HL");
+  const m = heal ? (/\{@dice ([^}|]+)\}([^.]{0,50})/i.exec(txt) || /\{@damage ([^}|]+)\}([^.]{0,50})/i.exec(txt))
+    : (/\{@damage ([^}|]+)\}([^.]{0,50})/i.exec(txt));
+  if (!m) return null;
+  return { dice: m[1].replace(/\s+/g, ""), addMod: /^\s*\+\s*your spellcasting ability modifier/i.test(m[2]),
+    kind: heal ? "healing" : ((raw.damageInflict || [])[0] || "") };
+}
+/* {@scaledamage 8d6|3-9|1d6} / {@scaledice 1d8|1-9|1d8}: the extra dice per slot level above the spell's. */
+function spellUpcastScale(raw) {
+  const txt = raw.entriesHigherLevel ? flattenEntries(raw.entriesHigherLevel) : "";
+  const m = /\{@scale(?:damage|dice) ([^|}]+)\|([^|}]+)\|([^}|]+)/i.exec(txt);
+  return m ? { per: m[3].trim(), step: /every two slot levels/i.test(txt) ? 2 : 1 } : null;
+}
+function spellUpcastText(raw) {
+  if (!raw.entriesHigherLevel) return "";
+  return stripTags(flattenEntries(raw.entriesHigherLevel))
+    .replace(/^at higher levels\.?\s*/i, "")
+    .replace(/^when you cast this spell using a spell slot of \S+ level or higher,\s*/i, "")
+    .replace(/\s*for (?:each|every) slot level above \S+?\./gi, " per slot level.")
+    .replace(/\s*for every two slot levels above \S+?\./gi, " per two slot levels.")
+    .replace(/^\w/, c => c.toUpperCase()).trim();
+}
+function spellCantripScaling(raw) {
+  const sc = raw.scalingLevelDice; if (!sc) return null;
+  const one = Array.isArray(sc) ? sc[0] : sc;
+  return one && one.scaling ? one.scaling : null;
+}
+function parseSpell(raw) {
+  const comp = raw.components || {};
+  return {
+    name: raw.name, source: raw.source, level: raw.level,
+    school: SPELL_SCHOOLS[raw.school] || raw.school || "",
+    ritual: !!(raw.meta && raw.meta.ritual),
+    attack: !!raw.spellAttack,
+    atkType: raw.spellAttack ? raw.spellAttack[0] : null,
+    save: raw.savingThrow ? raw.savingThrow[0] : null,
+    dmgTypes: raw.damageInflict || [],
+    conds: raw.conditionInflict || [],
+    areaTags: raw.areaTags || [],
+    rangeCat: rangeCat(raw),
+    rangeFt: rangeFeet(raw),
+    durType: durationCat(raw),
+    conc: !!(raw.duration && raw.duration.some(d => d && d.concentration)),
+    comp: { v: !!comp.v, s: !!comp.s, m: !!comp.m },
+    cast: (raw.time && raw.time[0] && raw.time[0].unit) || "",
+    dmg: spellDice(raw),
+    srd: !!raw.srd || !!raw.basicRules,
+    classes: (raw.classes && raw.classes.fromClassList || []).map(c => c.name),
+    text: stripTags(flattenEntries(raw.entries)),
+    higher: raw.entriesHigherLevel ? stripTags(flattenEntries(raw.entriesHigherLevel)) : "",
+    timeStr: spellTimeStr(raw),
+    castKind: spellCastKind(raw),
+    rangeStr: spellRangeStr(raw),
+    durStr: spellDurationStr(raw),
+    material: raw.components && raw.components.m ? (typeof raw.components.m === "string" ? raw.components.m : (raw.components.m.text || "")) : "",
+    effect: spellEffect(raw),
+    upScale: spellUpcastScale(raw),
+    upText: spellUpcastText(raw),
+    cantripScale: spellCantripScaling(raw),
+    // Tag-preserving versions of the above, kept only so the Spellcasting module can turn
+    // {@damage}/{@dice} tags into click-to-roll links (see renderInlineSpellText in spellcasting.js).
+    rawText: flattenEntries(raw.entries),
+    rawHigher: raw.entriesHigherLevel ? flattenEntries(raw.entriesHigherLevel) : ""
+  };
+}
+function mergeSpells(list) {
+  const seen = new Set(SPELL_LIB.map(s => s.name + "|" + s.source));
+  if (typeof editionMerge === "function") editionMerge(SPELL_LIB, list);
+  else list.forEach(s => { const k = s.name + "|" + s.source; if (!seen.has(k)) { SPELL_LIB.push(s); seen.add(k); } });
+  SPELL_LIB.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+}
+// 5e.tools ships per-spell class lists separately, in data/spells/sources.json - keyed by
+// [source][spellName] -> { class:[{name,source}], classVariant:[{name,source,definedInSource}] }
+// (classVariant = the same spell added to a class's list by a *different* sourcebook than the
+// spell's own). Both count as "this class can cast this spell" for the Class filter.
+function applySpellClasses(sourcesMap) {
+  if (!sourcesMap) return;
+  SPELL_LIB.forEach(s => {
+    const bySpell = sourcesMap[s.source];
+    const info = bySpell && bySpell[s.name];
+    if (!info) return;
+    const names = new Set(s.classes || []);
+    (info.class || []).forEach(c => names.add(c.name));
+    (info.classVariant || []).forEach(c => names.add(c.name));
+    s.classes = [...names];
+  });
+}
+function loadSpellFiles(files) {
+  const total = files.length; let done = 0, errs = [], sourcesJson = null;
+  [...files].forEach(file => {
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const j = JSON.parse(rd.result);
+        if (/sources\.json$/i.test(file.name)) sourcesJson = j;
+        else mergeSpells((j.spell || []).map(parseSpell));
+      }
+      catch (e) { errs.push(file.name + ": " + e); }
+      if (++done === total) {
+        if (sourcesJson) applySpellClasses(sourcesJson);
+        saveSpellLib(); renderSpellLibrary(); if (errs.length) alert("Some files failed:\n" + errs.join("\n"));
+      }
+    };
+    rd.readAsText(file);
+  });
+}
+/* ----- auto-load from a local data/ folder (a copy of 5e.tools' own data/ dir, dropped next to the sheet) -----
+   Only works when served over http(s) - browsers block fetch() of local files opened via file://.
+   Goes through dataFetch rather than fetch so a data/ folder the user connected off their own disk
+   answers these paths too, unchanged, when the sheet is hosted (see src/data-folder.js). */
+const SPELL_DATA_INDEX = "data/spells/index.json";
+const SPELL_SOURCES_URL = "data/spells/sources.json";
+async function autoLoadSpells() {
+  let idx;
+  try {
+    const res = await dataFetch(SPELL_DATA_INDEX);
+    if (!res.ok) return { found: false, blocked: false };
+    idx = await res.json();
+  } catch (e) { return { found: false, blocked: true }; }
+  const files = Object.values(idx);
+  const results = await Promise.allSettled(
+    files.map(f => dataFetch("data/spells/" + f).then(r => r.ok ? r.json() : Promise.reject(r.status)))
+  );
+  let filesLoaded = 0;
+  results.forEach(r => { if (r.status === "fulfilled") { mergeSpells((r.value.spell || []).map(parseSpell)); filesLoaded++; } });
+  try {
+    const res = await dataFetch(SPELL_SOURCES_URL);
+    if (res.ok) applySpellClasses(await res.json());
+  } catch (e) { /* class filter just stays empty if this one file is missing/unreadable */ }
+  if (filesLoaded) saveSpellLib();
+  return { found: true, blocked: false, filesLoaded, filesTotal: files.length };
+}
+function saveSpellLib() {
+  try { localStorage.setItem("charsheet-spelllib", JSON.stringify({ v: LIB_SCHEMA, spells: SPELL_LIB })); }
+  catch (e) { console.warn("Spell library too large for localStorage; kept in memory for this session only.", e); }
+}
+function loadSpellLib() {
+  try {
+    const d = JSON.parse(localStorage.getItem("charsheet-spelllib"));
+    if (d && d.v === LIB_SCHEMA) SPELL_LIB = typeof editionFilter === "function" ? editionFilter(d.spells) : (d.spells || []);
+    else { SPELL_LIB = []; if (d) localStorage.removeItem("charsheet-spelllib"); } // stale schema → re-import
+  } catch (e) { SPELL_LIB = []; }
+  localStorage.removeItem("charsheet-spellsrcoff"); // retire old keys
+}
+function spellSources() { return [...new Set(SPELL_LIB.map(s => s.source))].sort(); }
+function spellClassesInLib() { return [...new Set(SPELL_LIB.flatMap(s => s.classes || []))].sort(); }
+
+function renderSpellLibrary() {
+  $("spell-lib-count").textContent = SPELL_LIB.length ? (SPELL_LIB.length + " spells | " + spellSources().length + " source(s)") : "no spells loaded";
+  SPELL_FILTERS.renderArea();
+  renderSpellResults();
+}
+const SPELL_LIBRARY_SORT = createListSort([
+  { key: "level", label: "Level", numeric: true }, { key: "name", label: "Name" },
+  { key: "school", label: "School" }, { key: "hit", label: "Hit / Save", get: s => s.attack ? "atk" : s.save },
+  { key: "dmg", label: "Damage" }, { key: "conc", label: "Concentration", numeric: true },
+  { key: "ritual", label: "Ritual", numeric: true }, { key: "source", label: "Source" },
+]);
+function renderSpellResults() {
+  const q = ($("spell-search").value || "").toLowerCase().trim();
+  const active = SPELL_FILTERS.activeGroups();
+  const matches = SPELL_LIBRARY_SORT.rows(SPELL_LIB.filter(s => (!q || s.name.toLowerCase().includes(q)) && SPELL_FILTERS.passes(s, active)));
+  const rows = matches.slice(0, 250), more = Math.max(0, matches.length - rows.length);
+  const el = $("spell-results");
+  if (!SPELL_LIB.length) { el.innerHTML = "<div class='hint'>No spells loaded.</div>"; return; }
+  if (!rows.length) { el.innerHTML = "<div class='hint'>no matches</div>"; return; }
+  const addCls = ($("spell-add-class") || {}).value || "";
+  const body = rows.map(s => {
+    const key = (s.name + "|" + s.source).replace(/"/g, "&quot;");
+    const sv = s.attack ? "atk" : s.save ? (s.save.slice(0, 3) + " sv") : "";
+    const ban = (typeof banNote === "function") ? banNote("spell", s.name, s.source) : null;
+    const added = spellAddedTo(s.name, addCls);
+    const block = ban || added ? "" : spellAddBlock(s, addCls);
+    const btn = added
+      ? `<button class="sp-lib-add sp-lib-remove" data-key="${key}" aria-label="remove from ${escapeHtml(addCls || "Other")}">-</button>`
+      : `<button class="sp-lib-add" data-key="${key}"${ban || block ? ` disabled title="${escapeHtml(ban || block)}"` : ' aria-label="add to sheet"'}>+</button>`;
+    return `<tr${ban ? ' class="lib-banned"' : block ? ' class="lib-blocked"' : ""}>
+      <td>${btn}</td>
+      <td class="c"><b>${s.level}</b></td>
+      <td class="nm"><a class="sp-name-link" data-key="${key}">${s.name}</a>${ban ? ` <span class="lib-ban-tag" title="${escapeHtml(ban)}">banned</span>` : ""}</td>
+      <td class="hint">${s.school}</td>
+      <td class="hint">${sv}</td>
+      <td class="hint">${s.dmg || ""}</td>
+      <td class="c hint" aria-label="concentration">${s.conc ? "conc" : ""}</td>
+      <td class="c hint" aria-label="ritual">${s.ritual ? "R" : ""}</td>
+      <td class="hint">${s.source}</td>
+    </tr>`;
+  }).join("");
+  el.innerHTML = `<table class="spell-table"><thead><tr><th></th>${SPELL_LIBRARY_SORT.headers()}</tr></thead><tbody>${body}</tbody></table>` + (more ? `<div class='hint'>…and ${more} more - narrow your search</div>` : "");
+}
+// escapeHtml now lives in src/text-utils.js (loaded first), alongside the other shared string
+// helpers - it is used by the roster, inventory, event log and creator, not just by this library.
+// Its String() coercion still matters here: callers pass values straight out of imported 5e.tools
+// JSON, which is not always the string the surrounding code assumes (see collectNames in
+// class-library.js). A malformed value should render oddly, never throw and kill the whole render.
+function toggleSpellDetail(link) {
+  const tr = link.closest("tr"), next = tr.nextElementSibling;
+  if (next && next.classList.contains("sp-detail")) { next.remove(); return; }  // toggle off
+  const s = SPELL_LIB.find(x => (x.name + "|" + x.source) === link.dataset.key); if (!s) return;
+  const comp = ["v", "s", "m"].filter(k => s.comp && s.comp[k]).map(k => k.toUpperCase()).join("") || "-";
+  const meta = ["Level " + s.level, s.school, s.cast ? ("Cast: " + s.cast) : "", "Comp: " + comp,
+    s.conc ? "Concentration" : "", s.ritual ? "Ritual" : "", s.save ? (s.save + " save") : "", s.attack ? "spell attack" : ""].filter(Boolean).join(" | ");
+  const det = document.createElement("tr"); det.className = "sp-detail";
+  det.innerHTML = `<td></td><td colspan="8"><div class="hint">${meta}</div><div>${escapeHtml(normalizeDisplayPunctuation(s.text)).replace(/\n/g, "<br>")}</div>` +
+    (s.higher ? `<div style="margin-top:3px"><b>At Higher Levels:</b> ${escapeHtml(s.higher).replace(/\n/g, "<br>")}</div>` : "") + `</td>`;
+  tr.after(det);
+}
+/* Why a spell can't go on a class's list, or "" if it can: it must be on that class's list (Eldritch
+   Knights and Arcane Tricksters use the Wizard list; Magical Secrets opens every list) and no higher
+   than the class can cast, worked out per class as PHB p164 says. "Other" takes anything. */
+function spellListClassFor(row) {
+  const sub = (row.sub || "").trim().toLowerCase();
+  return typeof SUBCLASS_CASTING_STYLE === "object" && SUBCLASS_CASTING_STYLE[sub] ? "wizard" : row.name.trim().toLowerCase();
+}
+function hasMagicalSecrets(row) {
+  const name = row.name.trim().toLowerCase(), sub = (row.sub || "").trim().toLowerCase();
+  return name === "bard" && (row.lvl >= 10 || (/lore/.test(sub) && row.lvl >= 6));
+}
+function maxLearnableSpellLevel(row) {
+  const max = classMaxSpellLevel(row);
+  // Mystic Arcanum: one spell each of 6th to 9th level at Warlock 11, 13, 15 and 17.
+  if (row.name.trim().toLowerCase() === "warlock") return row.lvl >= 17 ? 9 : row.lvl >= 15 ? 8 : row.lvl >= 13 ? 7 : row.lvl >= 11 ? 6 : max;
+  return max;
+}
+function spellAddBlock(s, clsName) {
+  if (!clsName || !s) return "";
+  const row = getClasses().find(c => c.name.trim() === clsName); if (!row) return "";
+  if (s.level === 0) { if (!(classCantripsKnown(row) > 0)) return `${clsName} ${row.lvl} has no cantrips`; }
+  else {
+    const max = maxLearnableSpellLevel(row);
+    if (s.level > max) return max ? `${clsName} ${row.lvl} casts up to ${ordinalLevel(max)} level` : `${clsName} ${row.lvl} has no spells yet`;
+  }
+  const list = spellListClassFor(row);
+  if (!hasMagicalSecrets(row) && (s.classes || []).length && !s.classes.some(c => c.toLowerCase() === list))
+    return `not on the ${list.charAt(0).toUpperCase() + list.slice(1)} spell list`;
+  return "";
+}
+/* Index of a spell already added by hand under a class ("" = Other), or -1. */
+function spellAddedIndex(name, cls) {
+  const n = String(name || "").toLowerCase();
+  return CHARACTER_SPELLS.findIndex(x => !x.grantSrc && (x.cls || "") === (cls || "") && x.name.toLowerCase() === n);
+}
+function spellAddedTo(name, cls) { return spellAddedIndex(name, cls) >= 0; }
+/* + adds the spell to the chosen class; once it's there the button reads - and takes it off again. */
+function addSpellFromLib(key) {
+  const s = SPELL_LIB.find(x => (x.name + "|" + x.source) === key); if (!s) return;
+  const cls = $("spell-add-class").value;
+  const at = spellAddedIndex(s.name, cls);
+  if (at >= 0) removeCharacterSpell(at);
+  else { if (spellAddBlock(s, cls)) return; addCharacterSpell(cls, s.level, s.name); }
+  renderSpellResults();
+}

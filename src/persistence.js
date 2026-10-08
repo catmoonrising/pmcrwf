@@ -1,0 +1,198 @@
+/* ---------- Persistence ---------- */
+let saveTimer = null;
+let CUSTOM_FEATURES = [];
+let INVENTORY_TRANSACTIONS = [];
+// Backing scores include racial increases; retain their provenance for the score breakdown.
+let RACIAL_ABILITY_INCREASES = null;
+function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveState, 300); }
+
+// Browsers can suspend a background tab before either debounce fires. Flush only pending work,
+// so visiting a fresh sheet or returning from the back/forward cache does not create a save.
+function flushPendingSaves() {
+  if (saveTimer !== null || (typeof rosterSaveTimer !== "undefined" && rosterSaveTimer !== null)) saveState();
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushPendingSaves();
+});
+window.addEventListener("pagehide", flushPendingSaves);
+
+/* Validate the file before touching the live sheet. Older exports may omit newer collections,
+   but a library, layout, or roster file is not a character. Renderers still own the details of
+   their records; the rollback below also protects against malformed nested values. */
+function validateCharacterState(state) {
+  const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  const invalid = field => { throw new Error(`Invalid character data: ${field}.`); };
+  if (!isRecord(state) || !isRecord(state.fields)) invalid("expected a character with a fields object");
+  for (const [id, value] of Object.entries(state.fields)) {
+    if (!["string", "number", "boolean"].includes(typeof value)) invalid(`fields.${id} must be text, a number, or a checkbox value`);
+    const el = $(id);
+    if (el && el.matches("[data-persist]") && el.type === "checkbox" && typeof value !== "boolean") invalid(`fields.${id} must be true or false`);
+  }
+  for (const key of ["classes", "spells", "items", "attacks", "routines", "companions", "originSwaps", "customFeatures", "inventoryTransactions"]) {
+    if (state[key] == null) continue;
+    if (!Array.isArray(state[key]) || !state[key].every(isRecord)) invalid(`${key} must be a list of objects`);
+  }
+  for (const key of ["racialAbilityIncreases", "grantSpellChoices", "featChoices", "asiChoices", "optFeatureChoices", "usesState", "hdState", "effectChoices", "effectToggles", "proficiencies", "combat", "boons"]) {
+    if (state[key] != null && !isRecord(state[key])) invalid(`${key} must be an object`);
+  }
+  for (const key of ["weapons", "tools", "languages"]) {
+    const list = state.proficiencies && state.proficiencies[key];
+    if (list != null && (!Array.isArray(list) || !list.every(value => typeof value === "string"))) invalid(`proficiencies.${key} must be a list of names`);
+  }
+  if (state.inventoryTransactions && !state.inventoryTransactions.every(entry => Number.isFinite(entry.amount) && typeof entry.source === "string" && typeof entry.date === "string")) invalid("inventoryTransactions must contain numeric amounts, sources and dates");
+  if (state.items && !state.items.every(item => !item.custom || (isRecord(item.custom) && typeof item.name === "string" && typeof item.custom.text === "string" && Number.isFinite(item.custom.weight) && Number.isFinite(item.custom.valueGp)))) invalid("custom items must contain names, descriptions, numeric weights and values");
+  if (state.companions && !state.companions.every(companion => !companion.customRaw || (isRecord(companion.customRaw) && typeof companion.customRaw.name === "string"))) invalid("custom companions must contain a named stat block");
+  if (state.customFeatures && !state.customFeatures.every(feature => typeof feature.name === "string" && typeof feature.description === "string")) invalid("customFeatures must contain names and descriptions");
+  if (state.racialAbilityIncreases && !Object.values(state.racialAbilityIncreases).every(entry => isRecord(entry) && Number.isFinite(entry.amount) && typeof entry.source === "string")) invalid("racialAbilityIncreases must contain amounts and source names");
+  if (state.grantSpellChoices && !Object.values(state.grantSpellChoices).every(list => Array.isArray(list) && list.every(name => typeof name === "string"))) invalid("grantSpellChoices must contain lists of spell names");
+  if (state.originSwaps && !state.originSwaps.every(s => ["kind", "from", "toKind", "to"].every(key => typeof s[key] === "string"))) invalid("originSwaps must contain proficiency replacements");
+  if (state.skillOrder != null && (!Array.isArray(state.skillOrder) || !state.skillOrder.every(value => typeof value === "string"))) invalid("skillOrder must be a list of skill names");
+  return state;
+}
+
+function importCharacterState(text) {
+  const incoming = validateCharacterState(JSON.parse(text));
+  // The live collections are mutable; a shallow snapshot would be changed by a failed render.
+  const previous = JSON.parse(JSON.stringify(collectState()));
+  try { applyState(incoming); }
+  catch (error) { applyState(previous); throw error; }
+  saveState();
+}
+function collectState() {
+  const state = {
+    v: 1, effectsSv: 1,
+    fields: {}, classes: getClasses(), spells: CHARACTER_SPELLS, concentrating: CONCENTRATING, items: CHARACTER_ITEMS,
+    proficiencies: PROFICIENCIES, customFeatures: CUSTOM_FEATURES, inventoryTransactions: INVENTORY_TRANSACTIONS,
+    racialAbilityIncreases: RACIAL_ABILITY_INCREASES,
+    originSwaps: ORIGIN_SWAPS, grantSpellChoices: GRANT_SPELL_CHOICES, backgroundGrants: BACKGROUND_GRANTS,
+    attacks: (typeof getAttacks === "function" ? getAttacks() : []),
+    routines: (typeof ROUTINES !== "undefined" ? ROUTINES : []),
+    companions: (typeof COMPANIONS !== "undefined" ? COMPANIONS : []),
+    combat: (typeof COMBAT !== "undefined" ? COMBAT : null),   // the round tracker, so a fight survives a reload
+    boons: (typeof BOONS !== "undefined" ? BOONS : null),      // Guidance/Resistance/Death Ward counts (src/boons.js)
+    featChoices: FEAT_CHOICES, asiChoices: ASI_CHOICES, usesState: USES_STATE, hdState: HD_STATE,
+    optFeatureChoices: (typeof OPTFEATURE_CHOICES !== "undefined" ? OPTFEATURE_CHOICES : {}),
+    skillOrder: (typeof currentSkillOrder === "function" ? currentSkillOrder() : []),
+    effectChoices: EFFECT_CHOICES, effectToggles: EFFECT_TOGGLES,
+  };
+  document.querySelectorAll("[data-persist]").forEach(el => { state.fields[el.id] = el.type === "checkbox" ? el.checked : el.value; });
+  return state;
+}
+function applyState(state) {
+  if (!state) return;
+  if (typeof closeCustomRecordEditors === "function") closeCustomRecordEditors();
+  $("class-rows").innerHTML = "";
+  (state.classes || [{ name: "", sub: "", lvl: 1 }]).forEach(addClassRow);
+  INVENTORY_TRANSACTIONS = (state.inventoryTransactions || []).map(entry => ({ ...entry }));
+  CUSTOM_FEATURES = (state.customFeatures || []).map(feature => ({ ...feature }));
+  if (typeof closeCustomFeatureEditor === "function") closeCustomFeatureEditor();
+  CHARACTER_SPELLS = state.spells || [];
+  CONCENTRATING = state.concentrating || null;
+  CHARACTER_ITEMS = state.items || [];
+  PROFICIENCIES = {
+    weapons: state.proficiencies?.weapons || [],
+    tools: state.proficiencies?.tools || [],
+    languages: state.proficiencies?.languages || [],
+  };
+  RACIAL_ABILITY_INCREASES = state.racialAbilityIncreases || null;
+  ORIGIN_SWAPS = state.originSwaps || [];
+  GRANT_SPELL_CHOICES = state.grantSpellChoices || {};
+  BACKGROUND_GRANTS = state.backgroundGrants !== false;
+  FEAT_CHOICES = state.featChoices || {};
+  ASI_CHOICES = state.asiChoices || {};
+  if (typeof OPTFEATURE_CHOICES !== "undefined") OPTFEATURE_CHOICES = state.optFeatureChoices || {};
+  // The row order is the character's, so it follows a tab switch and an export (see rows.js).
+  if (typeof applySkillOrder === "function") applySkillOrder(state.skillOrder || []);
+  USES_STATE = state.usesState || {};
+  HD_STATE = state.hdState || {};
+  EFFECT_CHOICES = normalizeCustomLineageChoices(state.effectChoices || {});
+  EFFECT_TOGGLES = state.effectToggles || {};
+  /* Reset every persisted field to its markup default BEFORE writing the incoming ones. Everything
+     else in this function resets when the saved state lacks it (`state.spells || []`), but fields
+     were written in place, so any field absent from the incoming state kept the *previous*
+     character's value - switch from an elf to a state that predates the race box and you'd inherit
+     their Fey Ancestry. A live save always carries every field (collectState walks the same
+     selector), so this only bit hand-built and older-build states - exactly where a silent
+     carry-over is hardest to spot. `defaultValue` is the markup's own `value` attribute, so a field
+     that ships with a sensible starting number (Speed's 30) gets it back rather than going blank. */
+  document.querySelectorAll("[data-persist]").forEach(el => {
+    if (el.type === "checkbox") el.checked = el.defaultChecked;
+    else if (el.tagName === "SELECT") el.selectedIndex = Math.max(0, [...el.options].findIndex(o => o.defaultSelected));
+    else el.value = el.defaultValue;
+  });
+  // Hidden inputs mirror value into defaultValue. These lists start empty for older characters.
+  ABILITIES.forEach(a => { const el = $("score-" + a.key); if (el) el.value = "10"; });
+  ["cp", "sp", "ep", "gp", "pp"].forEach(k => { const el = $("coin-" + k); if (el?.type === "hidden") el.value = "0"; });
+  ["speed-custom", "speed-order", "sense-order"].forEach(id => { const el = $(id); if (el) el.value = ""; });
+  Object.entries(state.fields || {}).forEach(([id, val]) => {
+    const el = $(id); if (!el || !el.matches("[data-persist]")) return;
+    if (el.type === "checkbox") el.checked = val; else el.value = val;
+  });
+  // Preserve a pre-ledger purse or creator starting gold as an opening transaction.
+  if (typeof renderInventoryTracker === "function") {
+    const startingGold = num($("coin-gp"));
+    if (!INVENTORY_TRANSACTIONS.length && startingGold) INVENTORY_TRANSACTIONS.push({ amount: startingGold, source: "Opening balance", date: "" });
+    renderInventoryTracker();
+  }
+  // A character saved with an empty Speed (every one made before the box had a default) would leave
+  // the Movement pool reading 0/0. Refill it from the race here, at the one moment it can't fight
+  // someone typing - see syncRaceSpeed, which won't touch a number the player set themselves.
+  if (typeof syncRaceSpeed === "function") syncRaceSpeed();
+  initMathFields();
+  if (typeof addAttackRow === "function") { $("attack-rows").innerHTML = ""; (state.attacks || []).forEach(addAttackRow); }
+  if (typeof setRoutines === "function") setRoutines(state.routines || []);   // after attacks, so step pickers resolve names
+  if (typeof setCompanions === "function") setCompanions(state.companions || []);   // triggers the bestiary's lazy load if there are any
+  // The round tracker is per character: switching tabs mid-fight shows that character's own turn.
+  // normalizeCombat fills in any field a save made before it existed is missing (see its own comment).
+  if (typeof normalizeCombat === "function") { COMBAT = normalizeCombat(state.combat); if (typeof renderCombat === "function") renderCombat(); }
+  // Boons are per character too - two characters can each be under their own Guidance. renderBoons()
+  // also re-syncs the Death Ward HP watcher, so switching tabs can't read the previous character's
+  // hit points as a drop to 0.
+  if (typeof normalizeBoons === "function") { BOONS = normalizeBoons(state.boons); if (typeof renderBoons === "function") renderBoons(); }
+  refreshSpellAddClassSelect();
+  invalidateEffects();
+  recompute();
+  renderClassFeatures();
+  if (typeof renderHitDice === "function") renderHitDice();
+  if (typeof renderItemList === "function") renderItemList();   // not driven by recompute() - see derived.js
+  if (typeof renderEquipSlots === "function") renderEquipSlots();   // the paper doll reads CHARACTER_ITEMS, which has only just been set
+  if (typeof renderAllProficiencyLists === "function") renderAllProficiencyLists();
+  // Renders off a persisted field but only listens to its own `change` event, which writing .value
+  // above does not fire - so it has to be repainted explicitly or it keeps showing the previous
+  // character's exhaustion level (see status.js).
+  if (typeof updateExhaustion === "function") updateExhaustion();
+}
+/* Saving writes into the active roster entry (src/characters.js) rather than a single fixed key, so
+   every character on the tab bar keeps its own state. The entry's cached `name` is refreshed from the
+   live field on the way through - that cache is only ever used to label tabs. */
+function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  const state = collectState();
+  const entry = (typeof activeChar === "function") ? activeChar() : null;
+  let ok = true;
+  if (entry) {
+    entry.state = state;
+    entry.name = String((state.fields && state.fields["char-name"]) || "").trim() || "unnamed";
+    ok = persistRoster();
+    if (typeof renderCharacterTabs === "function") renderCharacterTabs();
+  } else {
+    try { localStorage.setItem("charsheet-v0", JSON.stringify(state)); }   // no roster (e.g. test harness)
+    catch (e) { console.warn("Could not write charsheet-v0", e); ok = false; }
+  }
+  // Report what actually happened. A failed write is almost always localStorage quota (a big roster,
+  // or logs that have grown) and the character is then only in memory - losable by closing the tab -
+  // so it has to be loud rather than a console line nobody is looking at.
+  const st = $("save-status");
+  st.classList.toggle("important-notice", !ok);
+  if (ok) { st.textContent = "saved " + new Date().toLocaleTimeString(); st.style.color = ""; st.removeAttribute("title"); }
+  else {
+    st.textContent = "NOT SAVED - browser storage full (this character is only in memory)";
+    st.style.color = "";
+    st.title = "Export this character to a file, then delete characters you no longer need or clear old event logs to free space.";
+  }
+}
+function loadState() {
+  if (typeof loadRoster === "function") return loadRoster();
+  try { return JSON.parse(localStorage.getItem("charsheet-v0")); } catch (e) { return null; }
+}
