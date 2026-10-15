@@ -219,10 +219,9 @@ function pointsSpent() {
 function creatorCombo(id, value, options, placeholder, extraClass, width, banKind, banPrefix) {
   return comboboxHtml({ id, value, options, placeholder, extraClass, width: width || "12rem", banKind, banPrefix });
 }
-/* Same control for one row of the class table - ids have to be per-row, so these carry a data-crrow
-   index and a class instead of an id. */
+/* A stable per-row ID lets redraws restore focus regardless of temporary styling classes. */
 function creatorRowCombo(cls, row, value, options, placeholder, banKind, banPrefix) {
-  return comboboxHtml({ value, options, placeholder, extraClass: cls, width: "11rem",
+  return comboboxHtml({ id: cls + "-" + row, value, options, placeholder, extraClass: cls, width: "11rem",
     dataAttr: `data-crrow="${row}"`, banKind, banPrefix });
 }
 
@@ -382,7 +381,7 @@ function raceFeatHtml() {
   if (typeof hrSetting === "function" && hrSetting("feats") === false) {
     return `<div style="margin-top:.4rem"><b>Feat</b> <span class="hint">off in this campaign's House Rules</span></div>`;
   }
-  const rows = slots.map(s => `<label class="cr-racefeat-slot">${escapeHtml(s.entry)}:
+  const rows = slots.map(s => `<label class="cr-racefeat-slot"><b>${escapeHtml(s.entry)}</b>
     ${creatorCombo("cr-racefeat-" + s.entry.replace(/[^a-z0-9]/gi, ""), CREATOR.raceFeats[s.entry] || "",
       filteredNames("feat", FEAT_LIB, CREATOR.raceFeats[s.entry] || ""), "type to search", "", "", "feat")}
     </label>`).join(" ");
@@ -390,7 +389,7 @@ function raceFeatHtml() {
     const f = (typeof creatorFeatureList === "function" ? creatorFeatureList() : []).find(x => x.isRaceFeat && x.featSlotName === s.entry);
     return f && (CREATOR.raceFeats[s.entry] || "").trim() && typeof crChoicesHtml === "function" ? crChoicesHtml(f) : "";
   }).join("");
-  return `<div style="margin-top:.4rem"><b>Feat</b> ${rows}${choices}</div>`;
+  return `<div style="margin-top:.4rem">${rows}${choices}</div>`;
 }
 
 /* Size. Most races are one size; a few (Dhampir, Fairy, and the other MPMM "Small or Medium" races)
@@ -399,9 +398,9 @@ function raceSizeHtml() {
   const rec = ciFindRace(CREATOR.race);
   const sizes = (rec && rec.size) || [];
   if (sizes.length <= 1) {
-    return sizes.length ? `<div class="hint" style="margin-top:.3rem">Size: <b>${SIZE_NAMES[sizes[0]] || sizes[0]}</b></div>` : "";
+    return sizes.length ? `<div style="margin-top:.3rem"><b>Size</b> ${SIZE_NAMES[sizes[0]] || sizes[0]}</div>` : "";
   }
-  return `<div style="margin-top:.3rem"><label>Size
+  return `<div style="margin-top:.3rem"><label><b>Size</b>
     <select id="cr-size">${sizes.map(s => `<option value="${s}"${CREATOR.size === s ? " selected" : ""}>${SIZE_NAMES[s] || s}</option>`).join("")}</select></label>
     </div>`;
 }
@@ -503,8 +502,8 @@ function creatorStepHtml() {
     const subs = subNames(rec);
     return `<div class="cr-step"><b>Step 1 | Choose a Race</b>
       ${sourceFilterHtml("race", RACE_LIB)}
-      <label>Race ${creatorCombo("cr-race", c.race, races, races.length ? "type to search" : "no race data - type freely", "", "", "race")}</label>
-      ${subs.length || c.subrace ? `<label style="margin-left:.6rem">Subrace ${creatorCombo("cr-subrace", c.subrace, subs, "none", "", "", "race")}</label>` : ""}
+      <label><b>Race</b> ${creatorCombo("cr-race", c.race, races, races.length ? "type to search" : "no race data - type freely", "", "", "race")}</label>
+      ${subs.length || c.subrace ? `<label style="margin-left:.6rem"><b>Subrace</b> ${creatorCombo("cr-subrace", c.subrace, subs, "none", "", "", "race")}</label>` : ""}
       <div style="margin-top:.4rem"><b>Ability increases</b></div>
       ${racialAsiHtml()}
       ${raceSizeHtml()}
@@ -644,7 +643,7 @@ function profListText(list) {
         const from = (v.from || []).map(x => String(x).replace(/\|.*/, ""));
         out.push(`choose ${v.count || 1} of: ${from.join(", ")}`);
       } else if (k === "any") { out.push(`any ${v}`);
-      } else if (k === "anyStandard") { out.push(`any ${v} standard language(s)`);
+      } else if (k === "anyStandard") { out.push(`any ${v} language(s)`);
       } else if (v === true) { out.push(String(k).replace(/\|.*/, "")); }
     });
   });
@@ -668,7 +667,9 @@ function flatProfNames(list) {
 function proficiencyOptions(kind, category = "any") {
   if (kind === "skills") return SKILLS.map(s => s[0]);
   if (kind === "languages") return Object.values(LANGUAGE_LIB)
-    .filter(l => category === "anyStandard" ? l.type === "standard" : category === "anyExotic" ? l.type === "exotic" : true)
+    // Free language choices include standard and exotic languages. Explicit choose lists
+    // and exotic-only grants still keep their own restrictions.
+    .filter(l => category === "anyStandard" ? ["standard", "exotic"].includes(l.type) : category === "anyExotic" ? l.type === "exotic" : true)
     .map(l => l.name).sort((a, b) => a.localeCompare(b));
   const types = { anyArtisansTool: "Artisan's Tools", anyMusicalInstrument: "Instrument", anyGamingSet: "Gaming Set" };
   const allowed = types[category] ? [types[category]] : ["Tools", "Artisan's Tools", "Instrument", "Gaming Set"];
@@ -902,9 +903,10 @@ function renderCreator() {
    list, the ability increases and the traits all depend on the race you're halfway through typing -
    but redrawing replaces the box itself, so focus and caret are restored afterwards. */
 function renderCreatorKeepingFocus(el) {
-  const id = el.id, cls = el.className, row = el.dataset.crrow, pos = el.selectionStart;
+  // Expanded fields acquire a temporary class on focus; the replacement input has no such class yet.
+  const id = el.id, cls = [...el.classList].filter(c => c !== "editing-expanded"), row = el.dataset.crrow, pos = el.selectionStart;
   renderCreator();
-  const again = id ? $(id) : document.querySelector(`.${cls.split(/\s+/).filter(Boolean).join(".")}[data-crrow="${row}"]`);
+  const again = id ? $(id) : $("cr-body").querySelector(`.${cls.join(".")}[data-crrow="${row}"]`);
   if (!again) return;
   again.focus();
   try { again.setSelectionRange(pos, pos); } catch (e) { /* not a text input; focus alone is enough */ }

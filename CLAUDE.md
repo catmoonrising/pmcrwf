@@ -1,5 +1,10 @@
 # Working on pmcrwf
 
+## Repository and publishing
+- Work in `catmoonrising/pmcrwf` and push changes to its `main` branch.
+- The live site is `https://catmoonrising.github.io/pmcrwf/`.
+- Use the repository's configured catmoonrising name and GitHub noreply email for commits.
+
 ## UI copy
 - Keep interface text terse. Labels, values and the rule itself; no hint lines that explain what a control does, reassure, or narrate ("it goes on the sheet's Features module too"). If a sentence would only be read once, leave it out.
 - No labels that only announce a feature or a fix ("(multiclass supported)", "all effects automated"). If it means nothing to someone opening the sheet for the first time, it goes.

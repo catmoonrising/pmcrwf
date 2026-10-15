@@ -174,7 +174,7 @@ function crBackgroundSkills() {
 function crTakenSkills(exceptKey, includeBackground = true) {
   const swapped = new Set(crOriginSwaps().filter(s => s.kind === "skills").map(s => crSkillSlug(s.from)));
   const features = creatorFeatureList();
-  const out = [...(includeBackground ? crBackgroundSkills() : []), ...crResolvedRaceProfs().skills,
+  const out = [...(CREATOR.existingSkills || []), ...(CREATOR.levelUpSkills || []), ...(includeBackground ? crBackgroundSkills() : []), ...crResolvedRaceProfs().skills,
     ...crEffectSkillGrants(features.filter(f => !["race", "subrace"].includes((f.origin || {}).kind))),
     ...crEffectSkillGrants(features.filter(f => ["race", "subrace"].includes((f.origin || {}).kind))).filter(s => !swapped.has(crSkillSlug(s)))];
   Object.keys(CREATOR.picks).filter(k => k.startsWith("skills:") && k !== exceptKey).forEach(k => out.push(...crPicked(k)));
@@ -230,7 +230,8 @@ function crLiveChoices(f) {
 function crChoiceMissing(f, c) {
   const v = (CREATOR.effectChoices[f.fkey] || {})[c.id];
   const n = c.kind === "pick" ? Math.max(1, c.n || 1) : 1;
-  const have = [].concat(v || []).filter(x => x != null && x !== "").length;
+  const proficient = isSkillExpertiseChoice(f, c) ? new Set(crTakenSkills().map(crSkillSlug)) : null;
+  const have = [].concat(v || []).filter(x => x != null && x !== "" && (!proficient || proficient.has(x))).length;
   return Math.max(0, n - have);
 }
 function crChoicesHtml(f) {
@@ -252,14 +253,17 @@ function crChoicesHtml(f) {
     const n = Math.max(1, c.n || 1);
     const vals = n > 1 ? [].concat(cur[c.id] || []) : [cur[c.id] || ""];
     const skillish = (c.options || []).every(o => SKILLS.some(s => crSkillSlug(s[0]) === o));
-    const taken = skillish ? new Set(crTakenSkills().map(crSkillSlug)) : new Set();
+    const expertise = skillish && isSkillExpertiseChoice(f, c);
+    const proficient = skillish ? new Set(crTakenSkills().map(crSkillSlug)) : new Set();
+    const taken = expertise ? new Set() : new Set(proficient);
     // Skills this same choice already holds don't count as taken elsewhere.
     vals.forEach(v => taken.delete(v));
     const selects = [];
     for (let i = 0; i < n; i++) {
       const v = vals[i] || "";
       const others = new Set(vals.filter((x, j) => j !== i && x));
-      const opts = (c.options || []).filter(o => o === v || (!others.has(o) && !taken.has(o)))
+      const opts = (c.options || []).filter(o => (expertise ? proficient.has(o) : true) &&
+        (o === v || (!others.has(o) && !taken.has(o))))
         .map(o => ({ o, label: choiceOptionLabel(o) })).sort((a, b) => a.label.localeCompare(b.label));
       selects.push(`<select ${attrs(c, n > 1 ? i : null)}><option value="">-</option>` +
         opts.map(({ o, label }) => `<option value="${escapeHtml(String(o))}"${v === o ? " selected" : ""}>${escapeHtml(label)}</option>`).join("") + `</select>`);
@@ -303,11 +307,11 @@ function crRaceProfHtml() {
   const lang = crPickSlotsHtml("langs:race", crLangBlocks(langs), [...fixedLangs, ...crBackgroundLanguages()]);
   const tool = crPickSlotsHtml("tools:race", crToolBlocks(tools), fixedTools);
   const rows = [];
-  if (fixedLangs.length || lang.total) rows.push(`<div>Languages ${escapeHtml(fixedLangs.join(", "))} ${lang.html}</div>`);
-  if (fixedWeapons.length) rows.push(`<div>Weapons ${escapeHtml(fixedWeapons.join(", "))}</div>`);
-  if (fixedTools.length || tool.total) rows.push(`<div>Tools ${escapeHtml(fixedTools.join(", "))} ${tool.html}</div>`);
-  if (resolved.skills.length) rows.push(`<div>Skills ${escapeHtml(resolved.skills.join(", "))}</div>`);
-  if (resolved.armor.length) rows.push(`<div>Armor ${escapeHtml(resolved.armor.join(", "))}</div>`);
+  if (fixedLangs.length || lang.total) rows.push(`<div><b>Languages</b> ${escapeHtml(fixedLangs.join(", "))} ${lang.html}</div>`);
+  if (fixedWeapons.length) rows.push(`<div><b>Weapons</b> ${escapeHtml(fixedWeapons.join(", "))}</div>`);
+  if (fixedTools.length || tool.total) rows.push(`<div><b>Tools</b> ${escapeHtml(fixedTools.join(", "))} ${tool.html}</div>`);
+  if (resolved.skills.length) rows.push(`<div><b>Skills</b> ${escapeHtml(resolved.skills.join(", "))}</div>`);
+  if (resolved.armor.length) rows.push(`<div><b>Armor</b> ${escapeHtml(resolved.armor.join(", "))}</div>`);
   return (rows.length ? `<div style="margin-top:.4rem">${rows.join("")}</div>` : "") + crOriginSwapsHtml();
 }
 

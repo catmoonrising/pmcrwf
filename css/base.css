@@ -704,6 +704,7 @@ button.linkish {
 .sb-table { border-collapse: collapse; width: 100%; font-size: .9rem; }
 .sb-table th { text-align: left; font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted-fg); padding: .35rem .4rem .15rem; white-space: nowrap; }
 .sb-table td { padding: .3rem .4rem; vertical-align: middle; border: 0; }
+.sb-table .sb-row > td { white-space: nowrap; }
 .sb-table .sb-name { white-space: nowrap; font-style: italic; }
 .sb-table .sb-act { white-space: nowrap; width: 1%; }
 .sb-cast { font: inherit; font-size: .75rem; font-weight: bold; text-transform: uppercase; padding: .1rem .45rem; }
@@ -712,8 +713,6 @@ button.linkish {
   background: var(--select); color: var(--select-fg); border-radius: 2px; }
 .sb-effect { font: inherit; font-size: .85rem; padding: .1rem .4rem; white-space: nowrap; }
 .sb-eff-kind { font-size: .75rem; color: var(--muted-fg); }
-.sb-up { font-size: .8rem; max-width: 16rem; }
-.sb-uptext { cursor: help; }
 .sb-detail td { padding-top: 0; }
 /* Manage Spells: laid out like the other dialogs, but not a .modal-overlay (see the markup). */
 .sp-manage-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 2000; }

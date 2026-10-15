@@ -191,6 +191,7 @@ const server = http.createServer((req, res) => {
     await require("./inventory-tracker-browser-checks.cjs")(page);
     await require("./custom-records-browser-checks.cjs")(page);
     await require("./purchases-browser-checks.cjs")(page);
+    await require("./sales-browser-checks.cjs")(page);
     await require("./equipment-sort-browser-checks.cjs")(page);
     await require("./custom-lineage-browser-checks.cjs")(page);
     await require("./senses-order-browser-checks.cjs")(page);
@@ -200,6 +201,10 @@ const server = http.createServer((req, res) => {
     await require("./list-sort-browser-checks.cjs")(page);
     await require("./item-variants-browser-checks.cjs")(page);
     await require("./level-up-browser-checks.cjs")(page);
+    await require("./expertise-browser-checks.cjs")(page);
+    await require("./language-choice-browser-checks.cjs")(page);
+    await require("./creator-focus-browser-checks.cjs")(page);
+    await require("./feature-asi-browser-checks.cjs")(page);
     if (process.env.PMCRWF_TEST_DATA) await require("./data-folder-browser-checks.cjs")(page, process.env.PMCRWF_TEST_DATA);
     assert.deepEqual(errors, []);
     console.log('Full app: import/rejection, reload persistence, export download, reset, delayed import switching, and hidden-tab save passed; no browser errors.');
