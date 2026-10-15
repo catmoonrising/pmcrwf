@@ -18,7 +18,7 @@ function openCustomItem(index = null) {
   customItemEditing = index;
   const item = index === null ? null : CHARACTER_ITEMS[index], record = item?.custom || {};
   const form = $('custom-item-editor');
-  form.innerHTML = '<b>Custom Item</b>' + customRecordField('Name', 'name', item?.name || '', 'text', 'required maxlength="200"') +
+  form.innerHTML = '<b>Custom Item</b> ' + customRecordField('Name', 'name', item?.name || '', 'text', 'required maxlength="200"') +
     customRecordField('Quantity', 'qty', item?.qty ?? 1, 'number', 'min="0" step="1" required') +
     customRecordField('Weight each (lb)', 'weight', record.weight ?? 0, 'number', 'min="0" step="any" required') +
     customRecordField('Value each (gp)', 'value', record.valueGp ?? 0, 'number', 'min="0" step="any" required') +
@@ -41,7 +41,7 @@ function openCustomCreature(id = null) {
   customCreatureEditing = id;
   const companion = id === null ? null : COMPANIONS.find(c => c.id === id), raw = companion?.customRaw || {};
   const form = $('custom-creature-editor');
-  form.innerHTML = '<b>Custom Stat Block</b>' + customRecordField('Name', 'name', raw.name || '', 'text', 'required maxlength="200"') +
+  form.innerHTML = '<b>Custom Stat Block</b> ' + customRecordField('Name', 'name', raw.name || '', 'text', 'required maxlength="200"') +
     `<label>Size <select name="size">${Object.entries({ T: 'Tiny', S: 'Small', M: 'Medium', L: 'Large', H: 'Huge', G: 'Gargantuan' }).map(([key, label]) => `<option value="${key}"${key === (raw.size?.[0] || 'M') ? ' selected' : ''}>${label}</option>`).join('')}</select></label>` +
     customRecordField('Creature type', 'type', raw.type || 'humanoid') +
     customRecordField('Armor Class', 'ac', raw.ac?.[0] ?? 10, 'number', 'min="0" required') +

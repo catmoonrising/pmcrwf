@@ -41,7 +41,7 @@ function openItemSale(index) {
   const r = resolvedItem(item);
   const price = item.custom ? item.custom.valueGp : r.lib ? itemValueGp(r.lib) : "";
   const form = $("item-sale-editor");
-  form.innerHTML = `<b>Sell ${escapeHtml(item.name)}</b>` +
+  form.innerHTML = `<b>Sell ${escapeHtml(item.name)}</b> ` +
     customRecordField("Quantity", "qty", Math.min(1, item.qty), "number", `min="0" max="${item.qty}" step="any" required`) +
     customRecordField("Price each (gp)", "price", price === "" ? "" : Number(price) / 2, "number", 'min="0" step="any" required') +
     '<div><button type="submit">Sell</button> <button type="button" data-sale-cancel>Cancel</button></div>';
