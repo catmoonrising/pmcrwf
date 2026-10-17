@@ -690,7 +690,7 @@ button.linkish {
 .sb-q.inc .sb-sym text { fill: var(--select); }
 .sb-q.exc .sb-sym path, .sb-q.exc .sb-sym rect { fill: var(--exclude-fg); }
 .sb-q.exc .sb-sym text { fill: var(--exclude); }
-.sb-level-head { display: flex; justify-content: space-between; align-items: center; gap: .5rem; flex-wrap: wrap;
+.sb-level-head { display: flex; justify-content: flex-start; align-items: center; gap: .5rem; flex-wrap: wrap;
   padding-bottom: .2rem; border-bottom: 1px solid var(--border-hair); }
 .sb-table td.sb-level-cell, .sb-table .sb-level-row > td { padding: .9rem 0 0; }
 .sb-table tbody.sb-level:first-child .sb-level-row > td { padding-top: .3rem; }
