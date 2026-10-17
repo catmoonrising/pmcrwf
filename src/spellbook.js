@@ -196,11 +196,19 @@ function renderSpellStats() {
 }
 function sbHitDc(row) {
   const lib = row.lib; if (!lib || (!lib.attack && !lib.save)) return "-";
-  const parts = row.origins.map(o => {
-    const st = spellStatsFor(o.ab); if (!st) return "-";
-    return lib.attack ? sign(st.atk) : `${SB_ABBR[lib.save] || String(lib.save).slice(0, 3).toUpperCase()} ${st.dc}`;
+  const parts = new Map();
+  row.origins.forEach(o => {
+    const st = spellStatsFor(o.ab);
+    const text = !st ? "-" : lib.attack ? sign(st.atk) : `${SB_ABBR[lib.save] || String(lib.save).slice(0, 3).toUpperCase()} ${st.dc}`;
+    if (!parts.has(text)) parts.set(text, { text, ab: st?.ab, labels: [] });
+    parts.get(text).labels.push(o.label);
   });
-  return [...new Set(parts)].map((p, i) => `<span title="${escapeHtml(row.origins[i] ? row.origins[i].label : "")}">${p}</span>`).join(" | ");
+  return [...parts.values()].map(p => {
+    const label = [...new Set(p.labels)].join(" | ");
+    return lib.attack && p.ab
+      ? `<button type="button" class="sb-atk-roll" data-ability="${escapeHtml(p.ab)}" data-rolllabel="${escapeHtml(row.name + ' (' + label + ')')}" title="${escapeHtml(label)}" aria-label="${escapeHtml('Roll ' + row.name + ' attack (' + label + ')')}">${escapeHtml(p.text)}</button>`
+      : `<span title="${escapeHtml(label)}">${escapeHtml(p.text)}</span>`;
+  }).join(" | ");
 }
 function sbRowHtml(row, level, rowId) {
   const lib = row.lib || {};

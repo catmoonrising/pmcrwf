@@ -243,7 +243,7 @@ function isProficientCheck(key) {
   if (key.startsWith("save-") && typeof saveProfMult === "function") return saveProfMult(key.slice(5)) > 0;
   return false;
 }
-const D20SEL = "[data-roll-check], .atk-roll, .wpn-roll, .mon-roll";   // buttons that roll a d20 check (adv/dis applies)
+const D20SEL = "[data-roll-check], .atk-roll, .sb-atk-roll, .wpn-roll, .mon-roll";   // buttons that roll a d20 check (adv/dis applies)
 /* The value + check-key of the most recent d20 roll, for callers that need to react to what a roll
    actually came up as (combat.js reads this off an Initiative roll to seed the turn-order tracker)
    without re-rolling it themselves - a second roll would land on a different number than the one
@@ -282,6 +282,12 @@ function rollInfo(btn) {
       // "check-proficient" rather than per skill; a floor aimed at one specific check still works.
       dieFloor: (typeof effDieFloor === "function")
         ? Math.max(effDieFloor(k), isProficientCheck(k) ? effDieFloor("check-proficient") : 0) : 0 };
+  }
+  // Spellcasting rows use their source's casting ability, which may differ from the sheet default.
+  if (btn.classList.contains("sb-atk-roll")) {
+    const stats = spellStatsFor(btn.dataset.ability); if (!stats) return null;
+    return { attack: true, bonus: stats.atk, dice: spellAttackDice(), label: btn.dataset.rolllabel + effAnnotations("spellatk"),
+      mode: (typeof conditionMode === "function") ? combineModes(effMode("spellatk"), conditionMode("spellatk")) : effMode("spellatk") };
   }
   // inline "spell attack" phrase inside an expanded spell description (see renderInlineSpellText)
   if (btn.classList.contains("atk-roll")) {
